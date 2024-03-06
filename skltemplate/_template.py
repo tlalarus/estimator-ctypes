@@ -2,6 +2,7 @@
 This is a module to be used as a reference for building other modules
 """
 import numpy as np
+import ctypes
 from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin
 from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
 from sklearn.utils.multiclass import unique_labels
@@ -31,6 +32,16 @@ class TemplateEstimator(BaseEstimator):
     """
     def __init__(self, demo_param='demo_param'):
         self.demo_param = demo_param
+        self.mylib = ctypes.cdll.LoadLibrary('/home/jovyan/work/skltemplate/cpplib/libT5Calibration.so')
+        self.calib_new = self.mylib.CalibExport_new
+        self.calib_new.restype = ctypes.c_void_p
+        self.calib_new.argtypes = []
+        self.lib_ptr = self.calib_new()
+
+        self.calib_initXML = self.mylib.CalibExport_InitXml
+        self.calib_initXML.restype = ctypes.c_bool
+        self.calib_initXML.argtypes = [ctypes.c_void_p, ctypes.c_cahr_p]
+        self.calib_initXML(self.lib_ptr, "")
 
     def fit(self, X, y):
         """A reference implementation of a fitting function.
@@ -67,8 +78,30 @@ class TemplateEstimator(BaseEstimator):
             Returns an array of ones.
         """
         X = check_array(X, accept_sparse=True)
+
+        n_samples = X.shape[0]
+        y_pred = np.zeros((n_samples, 3), dtype=np.float64)
+
+        for i, point2D_pair in enumerate(X):
+            pt2d_pair_arr = point2D_pair.data_as(ctypes.POINTER(ctypes.c_double)) # length = 4
+
+            self.calib_cal3d = self.mylib.CalibExport_Calculate3DPoint
+            self.calib_cal3d.restype = ctypes.c_double
+            self.calib_cal3d.argtypes = [ctypes.c_void_p,
+                                         ctypes.POINTER(ctypes.c_double), # src1, src2
+                                         ctypes.POINTER(ctypes.c_double), # dst
+                                         ctypes.c_int,
+                                         ctypes.c_bool,
+                                         ctypes.c_bool,
+                                         ctypes.c_bool]
+            y = np.arange(3, dtype=np.float64)
+            self.calib_cal3d(self.lib_ptr, pt2d_pair_arr, y, 0, True, True, True)
+            y_pred[i, 0] = y[0]
+            y_pred[i, 1] = y[1]
+            y_pred[i, 2] = y[2]
+
         check_is_fitted(self, 'is_fitted_')
-        return np.ones(X.shape[0], dtype=np.int64)
+        return y_pred
 
 
 class TemplateClassifier(ClassifierMixin, BaseEstimator):
